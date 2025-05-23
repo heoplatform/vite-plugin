@@ -1,0 +1,30 @@
+{
+  "name": "vite-plugin",
+  "version": "1.0.0",
+  "description": "The plugin for vite",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/compression": "^1.8.0",
+    "@types/express": "^5.0.2",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "base-plugin-system": "1.0.0",
+    "compression": "^1.8.0",
+    "express": "^5.1.0",
+    "express-plugin": "1.0.0",
+    "sirv": "^3.0.1"
+  }
+}
