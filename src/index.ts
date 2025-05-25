@@ -1,9 +1,11 @@
 import { BaseHooks } from "base-plugin-system";
 import { type ExpressHooks } from "express-plugin";
 import express from "express";
-import { createServer, ViteDevServer, type InlineConfig } from "vite";
+import { createServer, build, ViteDevServer, type InlineConfig } from "vite";
 import fs from "fs";
 import fsAsync from "fs/promises";
+import minimist from "minimist";
+import path from "path";
 
 export interface VitePluginConfig {
   /**
@@ -47,7 +49,7 @@ function pluginHasViteHooks(plugin: any): plugin is ViteHooks {
   return "configureVite" in plugin || "initVite" in plugin;
 }
 
-function createViteEnvironment(viteConfig: VitePluginConfig) {
+function createViteEnvironment(serverPluginModules: string[], clientPluginModules: string[]) {
   const viteDir = './.vite';
   
   // Create .vite directory if it doesn't exist
@@ -72,7 +74,7 @@ function createViteEnvironment(viteConfig: VitePluginConfig) {
   </body>
 </html>`;
 
-  const serverModuleMap = Object.fromEntries(viteConfig.serverPluginModules.map((p, i) => ["plugin" + i, p]));
+  const serverModuleMap = Object.fromEntries(serverPluginModules.map((p, i) => ["plugin" + i, p]));
 
   const serverTs = `import clientPlugins from './client.ts';
 ${Object.entries(serverModuleMap).map(([key, value]) => `import ${key} from '${value}';`).join("\n")}
@@ -91,13 +93,13 @@ for (const plugin of serverPlugins) {
 
 export default serverPlugins;`;
 
-  const clientModuleMap = Object.fromEntries(viteConfig.clientPluginModules.map((p, i) => ["plugin" + i, p]));
+  const clientModuleMap = Object.fromEntries(clientPluginModules.map((p, i) => ["plugin" + i, p]));
 
   const clientTs = `import { initPlugins } from 'base-plugin-system';
 ${Object.entries(clientModuleMap).map(([key, value]) => `import ${key} from '${value}';`).join("\n")}
 
 const clientPlugins = [${Object.keys(clientModuleMap).map(key => `${key}()`).join(", ")}];
-await initPlugins(clientPlugins);
+initPlugins(clientPlugins);
 
 export default clientPlugins;`;
   fs.writeFileSync(`${viteDir}/index.html`, indexHtml);
@@ -109,71 +111,137 @@ function isTruthy<T>(value: T): value is NonNullable<T> {
   return Boolean(value);
 }
 
-function vitePlugin(): BaseHooks & ExpressHooks {
+async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[]) {
+  let viteConfig: VitePluginConfig = {
+    config: {
+      server: { middlewareMode: true },
+      appType: "custom",
+      root: "./.vite",
+      base: "/",
+      build: {
+        target: "esnext",
+      },
+      optimizeDeps: {
+        exclude: ['express']
+      },
+      plugins: [
+        
+      ]
+    },
+    clientPluginModules: [],
+    serverPluginModules: [],
+  };
+
+  for (const hook of configureViteHooks) {
+    viteConfig = await hook(viteConfig);
+  }
+
+  return viteConfig;
+}
+
+async function getViteProdConfig(ssr: boolean, configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[]) {
+  let viteConfig: VitePluginConfig = {
+    config: {
+      appType: "custom",
+      root: "./.vite",
+      base: "/",
+      build: {
+        rollupOptions: ssr ? {
+          input: ["./.vite/server.ts", "./.vite/client.ts"],
+        } : {
+          
+        },
+        outDir: ssr ? "./dist/server" : "./dist/client",
+        target: "esnext",
+        ssrManifest: !ssr,
+        ssr: ssr,
+      },
+      optimizeDeps: {
+        exclude: ['express']
+      },
+      plugins: [
+        
+      ]
+    },
+    clientPluginModules: [],
+    serverPluginModules: [],
+  };
+
+  for (const hook of configureViteHooks) {
+    viteConfig = await hook(viteConfig);
+  }
+
+  return viteConfig;
+}
+
+
+function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   let plugins: any[] = [];
   let vite: ViteDevServer;
   let router: express.Router = express.Router();
-  const isProduction = process.env.NODE_ENV === "production";
+  let isProduction = process.env.NODE_ENV === "production";
   
   return {
+    name: "vite",
     init: async (_plugins) => {
       plugins = _plugins;
     },
     postInit: async () => {
-
+      
     },
-    initExpress: async (app) => {
+    initExpress: async (app, stop) => {
+      const args = minimist(process.argv.slice(2));
+      
       const relevantPlugins = plugins.filter(pluginHasViteHooks);
       const configureViteHooks = relevantPlugins.map((p) => p.configureVite).filter(isTruthy);
       const initViteHooks = relevantPlugins.map((p) => p.initVite).filter(isTruthy);
 
-      let viteConfig: VitePluginConfig = {
-        config: {
-          server: { middlewareMode: true },
-          appType: "custom",
-          root: "./.vite",
-          base: "/",
-          optimizeDeps: {
-            exclude: ['express']
-          },
-          plugins: [
-            
-          ]
-        },
-        clientPluginModules: [],
-        serverPluginModules: [],
-      };
+      if (args.build) {
+        // no ssr
+        const viteConfig = await getViteProdConfig(false, configureViteHooks);
+        createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
+        
+        await build(viteConfig.config);
+        // ssr
+        const viteConfigSSR = await getViteProdConfig(true, configureViteHooks);
+        createViteEnvironment(viteConfigSSR.serverPluginModules, viteConfigSSR.clientPluginModules);
+        await build(viteConfigSSR.config);
 
-      for (const hook of configureViteHooks) {
-        viteConfig = await hook(viteConfig);
+        stop();
+        return;
+      } else if (args.preview) {
+        isProduction = true;
       }
-
-      createViteEnvironment(viteConfig);
+      
       if (!isProduction) {
+        const viteConfig = await getViteDevConfig(configureViteHooks);
+        createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
         vite = await createServer(viteConfig.config);
         router.use(vite.middlewares);
       } else {
         const compression = (await import("compression")).default;
         const sirv = (await import("sirv")).default;
         router.use(compression());
-        router.use("/", sirv("./dist/client", { extensions: [] }));
+        router.use("/", sirv("./.vite/dist/client", { extensions: [] }));
       }
 
       app.use(router);
 
+      const cwd = process.cwd();
+
       async function getClientPluginManager() {
-        const clientPluginManager = await vite.ssrLoadModule("/client.ts").then((m) => m.default) as any;
+        const clientPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/client.js") as string).then((m) => m.default) as any : await vite.ssrLoadModule("/client.ts").then((m) => m.default) as any;
         return clientPluginManager;
       }
 
       async function getServerPluginManager() {
-        const serverPluginManager = await vite.ssrLoadModule("/server.ts").then((m) => m.default) as any;
+        const serverPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/server.js") as string).then((m) => m.default) as any : await vite.ssrLoadModule("/server.ts").then((m) => m.default) as any;
         return serverPluginManager;
       }
 
       // Cached distribution assets
       const templateHtmlPromise = isProduction
-      ? fsAsync.readFile("./dist/client/index.html", "utf-8")
+      ? fsAsync.readFile("./.vite/dist/client/index.html", "utf-8")
       : undefined;
 
       async function generateHTMLTemplate(url: string, head: string, body: string) {

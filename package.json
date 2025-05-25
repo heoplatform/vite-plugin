@@ -15,6 +15,7 @@
   "devDependencies": {
     "@types/compression": "^1.8.0",
     "@types/express": "^5.0.2",
+    "@types/minimist": "^1.2.5",
     "typescript": "^5.8.3"
   },
   "peerDependencies": {
@@ -25,6 +26,7 @@
     "compression": "^1.8.0",
     "express": "^5.1.0",
     "express-plugin": "1.0.0",
+    "minimist": "^1.2.8",
     "sirv": "^3.0.1"
   }
 }
