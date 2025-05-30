@@ -25,8 +25,6 @@ export interface VitePluginConfig {
 type MaybePromise<T> = T | Promise<T>;
 
 export type InitVite = {
-  getClientPluginManager: () => Promise<any[]>;
-  getServerPluginManager: () => Promise<any[]>;
   generateHTMLTemplate: (url: string, head: string, body: string) => Promise<string>;
 } & ({
   mode: "dev";
@@ -41,8 +39,8 @@ export interface ViteHooks {
 }
 
 export interface SSRBaseHooks {
-  init: (serverPlugins: any[], clientPlugins: any[]) => MaybePromise<void>;
-  postInit: () => MaybePromise<void>;
+  init?: (plugins: any[]) => MaybePromise<void>;
+  postInit?: (vite: InitVite) => MaybePromise<void>;
 }
 
 function pluginHasViteHooks(plugin: any): plugin is ViteHooks {
@@ -70,40 +68,35 @@ function createViteEnvironment(serverPluginModules: string[], clientPluginModule
   </head>
   <body>
     <div id="app"><!--app-html--></div>
-    <script type="module" src="./client.ts"></script>
+    <script type="module" src="/client.ts"></script>
   </body>
 </html>`;
 
   const serverModuleMap = Object.fromEntries(serverPluginModules.map((p, i) => ["plugin" + i, p]));
 
-  const serverTs = `import clientPlugins from './client.ts';
-${Object.entries(serverModuleMap).map(([key, value]) => `import ${key} from '${value}';`).join("\n")}
+  const serverTs = `${Object.entries(serverModuleMap).map(([key, value]) => `import ${key} from '${value}';`).join("\n")}
 
-const serverPlugins = [${Object.keys(serverModuleMap).map(key => `${key}()`).join(", ")}];
-for (const plugin of serverPlugins) {
-  if (plugin.init) {
-    await plugin.init(serverPlugins, clientPlugins);
-  }
-}
-for (const plugin of serverPlugins) {
-  if (plugin.postInit) {
-    await plugin.postInit();
-  }
-}
+const getServerPlugins = () => [${Object.keys(serverModuleMap).map(key => `${key}()`).join(", ")}];
 
-export default serverPlugins;`;
+
+export default getServerPlugins;`;
 
   const clientModuleMap = Object.fromEntries(clientPluginModules.map((p, i) => ["plugin" + i, p]));
 
+  const clientPluginsTs = `${Object.entries(clientModuleMap).map(([key, value]) => `import ${key} from '${value}';`).join("\n")}
+
+const getClientPlugins = () => [${Object.keys(clientModuleMap).map(key => `${key}()`).join(", ")}];
+
+export default getClientPlugins;`;
+
   const clientTs = `import { initPlugins } from 'base-plugin-system';
-${Object.entries(clientModuleMap).map(([key, value]) => `import ${key} from '${value}';`).join("\n")}
+import getClientPlugins from './clientPlugins.ts';
+initPlugins(getClientPlugins());`;
 
-const clientPlugins = [${Object.keys(clientModuleMap).map(key => `${key}()`).join(", ")}];
-initPlugins(clientPlugins);
 
-export default clientPlugins;`;
   fs.writeFileSync(`${viteDir}/index.html`, indexHtml);
   fs.writeFileSync(`${viteDir}/client.ts`, clientTs);
+  fs.writeFileSync(`${viteDir}/clientPlugins.ts`, clientPluginsTs);
   fs.writeFileSync(`${viteDir}/server.ts`, serverTs);
 }
 
@@ -111,7 +104,7 @@ function isTruthy<T>(value: T): value is NonNullable<T> {
   return Boolean(value);
 }
 
-async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[]) {
+async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[], reload: () => Promise<void>) {
   let viteConfig: VitePluginConfig = {
     config: {
       server: { middlewareMode: true },
@@ -125,7 +118,12 @@ async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) 
         exclude: ['express']
       },
       plugins: [
-        
+        {
+          name: "vite-plugin-reload",
+          handleHotUpdate: async (ctx) => {
+            await reload();
+          }
+        }
       ]
     },
     clientPluginModules: [],
@@ -147,7 +145,7 @@ async function getViteProdConfig(ssr: boolean, configureViteHooks: ((config: Vit
       base: "/",
       build: {
         rollupOptions: ssr ? {
-          input: ["./.vite/server.ts", "./.vite/client.ts"],
+          input: ["./.vite/server.ts", "./.vite/client.ts", "./.vite/clientPlugins.ts"],
         } : {
           
         },
@@ -180,6 +178,93 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   let vite: ViteDevServer;
   let router: express.Router = express.Router();
   let isProduction = process.env.NODE_ENV === "production";
+  let app!: express.Application;
+  let stop!: () => void;
+  let templateHtmlPromise: Promise<string> | undefined;
+
+  async function generateHTMLTemplate(url: string, head: string, body: string) {
+    let template = "";
+    
+    if (vite) {
+      const unProcessedTemplate = await fsAsync.readFile("./.vite/index.html", "utf-8");
+      template = await vite.transformIndexHtml(url, unProcessedTemplate);
+    } else {
+      template = templateHtmlPromise ? await templateHtmlPromise : "";
+    }
+    return template.replace("<!--app-head-->", head).replace("<!--app-html-->", body);
+  }
+
+  function getRelevantHooks() {
+    const relevantPlugins = plugins.filter(pluginHasViteHooks);
+    const configureViteHooks = relevantPlugins.map((p) => p.configureVite).filter(isTruthy);
+    const initViteHooks = relevantPlugins.map((p) => p.initVite).filter(isTruthy);
+    return { configureViteHooks, initViteHooks };
+  }
+
+  async function reloadPlugins() {
+    // Remove all plugins that have the _vitePlugin flag
+    for (let i = plugins.length - 1; i >= 0; i--) {
+      if (plugins[i]._vitePlugin) {
+        plugins.splice(i, 1);
+      }
+    }
+    
+    const cwd = process.cwd();
+    const clientPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/clientPlugins.js") as string).then((m) => m.default()) as any : await vite.ssrLoadModule("/clientPlugins.ts").then((m) => m.default()) as any;
+    const serverPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/server.js") as string).then((m) => m.default()) as any : await vite.ssrLoadModule("/server.ts").then((m) => m.default()) as any;
+
+    plugins.push(...clientPluginManager);
+    plugins.push(...serverPluginManager);
+
+    for (const plugin of clientPluginManager) {
+      plugin._vitePlugin = true;
+      if (plugin.init) {
+        await plugin.init(plugins);
+      }
+    }
+
+    for (const plugin of serverPluginManager) {
+      plugin._vitePlugin = true;
+      if (plugin.init) {
+        await plugin.init(plugins);
+      }
+    }
+
+    for (const plugin of clientPluginManager) {
+      if (plugin.postInit) {
+        await plugin.postInit();
+      }
+    }
+
+    for (const plugin of serverPluginManager) {
+      if (plugin.postInit) {
+        await plugin.postInit({
+          mode: isProduction ? "prod" : "dev",
+          server: vite,
+          generateHTMLTemplate,
+        });
+      }
+    }
+  }
+
+  async function restartServer(configureViteHooks?: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[]) {
+    if (!configureViteHooks) {
+      configureViteHooks = getRelevantHooks().configureViteHooks;
+    }
+    if (!isProduction) {
+      const viteConfig = await getViteDevConfig(configureViteHooks, reloadPlugins);
+      createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
+      vite = await createServer(viteConfig.config);
+      router.use(vite.middlewares);
+    } else {
+      const compression = (await import("compression")).default;
+      const sirv = (await import("sirv")).default;
+      router.use(compression());
+      router.use("/", sirv("./.vite/dist/client", { extensions: [] }));
+    }
+
+    await reloadPlugins();
+  }
   
   return {
     name: "vite",
@@ -189,12 +274,14 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     postInit: async () => {
       
     },
-    initExpress: async (app, stop) => {
+    initExpress: async (_app, _stop) => {
+      app = _app;
+      stop = _stop;
+    },
+    postInitExpress: async () => {
       const args = minimist(process.argv.slice(2));
-      
-      const relevantPlugins = plugins.filter(pluginHasViteHooks);
-      const configureViteHooks = relevantPlugins.map((p) => p.configureVite).filter(isTruthy);
-      const initViteHooks = relevantPlugins.map((p) => p.initVite).filter(isTruthy);
+
+      const { configureViteHooks, initViteHooks } = getRelevantHooks();
 
       if (args.build) {
         // no ssr
@@ -212,56 +299,20 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
       } else if (args.preview) {
         isProduction = true;
       }
-      
-      if (!isProduction) {
-        const viteConfig = await getViteDevConfig(configureViteHooks);
-        createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
-        vite = await createServer(viteConfig.config);
-        router.use(vite.middlewares);
-      } else {
-        const compression = (await import("compression")).default;
-        const sirv = (await import("sirv")).default;
-        router.use(compression());
-        router.use("/", sirv("./.vite/dist/client", { extensions: [] }));
-      }
+
+      await restartServer(configureViteHooks);
 
       app.use(router);
 
-      const cwd = process.cwd();
-
-      async function getClientPluginManager() {
-        const clientPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/client.js") as string).then((m) => m.default) as any : await vite.ssrLoadModule("/client.ts").then((m) => m.default) as any;
-        return clientPluginManager;
-      }
-
-      async function getServerPluginManager() {
-        const serverPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/server.js") as string).then((m) => m.default) as any : await vite.ssrLoadModule("/server.ts").then((m) => m.default) as any;
-        return serverPluginManager;
-      }
-
       // Cached distribution assets
-      const templateHtmlPromise = isProduction
+      templateHtmlPromise = isProduction
       ? fsAsync.readFile("./.vite/dist/client/index.html", "utf-8")
       : undefined;
 
-      async function generateHTMLTemplate(url: string, head: string, body: string) {
-        let template = "";
-        
-        if (vite) {
-          const unProcessedTemplate = await fsAsync.readFile("./.vite/index.html", "utf-8");
-          template = await vite.transformIndexHtml(url, unProcessedTemplate);
-        } else {
-          template = templateHtmlPromise ? await templateHtmlPromise : "";
-        }
-        return template.replace("<!--app-head-->", head).replace("<!--app-html-->", body);
-      }
-
       for (const hook of initViteHooks) {
         await hook({
-          getClientPluginManager,
           mode: isProduction ? "prod" : "dev",
           server: vite,
-          getServerPluginManager,
           generateHTMLTemplate,
         });
       }
