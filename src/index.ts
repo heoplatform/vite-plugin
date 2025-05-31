@@ -43,6 +43,11 @@ export interface SSRBaseHooks {
   postInit?: (vite: InitVite) => MaybePromise<void>;
 }
 
+export interface ClientBaseHooks {
+  init?: (plugins: any[]) => MaybePromise<void>;
+  postInit?: (vite?: InitVite) => MaybePromise<void>;
+}
+
 function pluginHasViteHooks(plugin: any): plugin is ViteHooks {
   return "configureVite" in plugin || "initVite" in plugin;
 }
@@ -232,7 +237,11 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
 
     for (const plugin of clientPluginManager) {
       if (plugin.postInit) {
-        await plugin.postInit();
+        await plugin.postInit({
+          mode: isProduction ? "prod" : "dev",
+          server: vite,
+          generateHTMLTemplate,
+        });
       }
     }
 
