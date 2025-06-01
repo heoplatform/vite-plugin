@@ -207,7 +207,6 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   }
 
   async function reloadPlugins() {
-    // Remove all plugins that have the _vitePlugin flag
     for (let i = plugins.length - 1; i >= 0; i--) {
       if (plugins[i]._vitePlugin) {
         plugins.splice(i, 1);
@@ -215,8 +214,11 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     }
     
     const cwd = process.cwd();
-    const clientPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/clientPlugins.js") as string).then((m) => m.default()) as any : await vite.ssrLoadModule("/clientPlugins.ts").then((m) => m.default()) as any;
-    const serverPluginManager = isProduction ? await import(path.join(cwd, "./.vite/dist/server/server.js") as string).then((m) => m.default()) as any : await vite.ssrLoadModule("/server.ts").then((m) => m.default()) as any;
+    const clientPluginModule = isProduction ? await import(path.join(cwd, "./.vite/dist/server/clientPlugins.js") as string) : await vite.ssrLoadModule("/clientPlugins.ts");
+    const clientPluginManager = clientPluginModule.default();
+
+    const serverPluginModule = isProduction ? await import(path.join(cwd, "./.vite/dist/server/server.js") as string) : await vite.ssrLoadModule("/server.ts");
+    const serverPluginManager = serverPluginModule.default();
 
     plugins.push(...clientPluginManager);
     plugins.push(...serverPluginManager);
