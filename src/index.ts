@@ -1,5 +1,5 @@
-import { BaseHooks } from "base-plugin-system";
-import { type ExpressHooks } from "express-plugin";
+import { BaseHooks } from "@yetifrozty/base-plugin-system";
+import { type ExpressHooks } from "@yetifrozty/express-plugin";
 import express from "express";
 import { createServer, build, ViteDevServer, type InlineConfig } from "vite";
 import fs from "fs";
@@ -94,7 +94,7 @@ const getClientPlugins = () => [${Object.keys(clientModuleMap).map(key => `${key
 
 export default getClientPlugins;`;
 
-  const clientTs = `import { initPlugins } from 'base-plugin-system';
+  const clientTs = `import { initPlugins } from '@yetifrozty/base-plugin-system';
 import getClientPlugins from './clientPlugins.ts';
 initPlugins(getClientPlugins());`;
 
@@ -120,7 +120,10 @@ async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) 
         target: "esnext",
       },
       optimizeDeps: {
-        exclude: ['express']
+        exclude: [
+          'express',
+          '@yetifrozty/vite-plugin',
+        ]
       },
       plugins: [
         {
