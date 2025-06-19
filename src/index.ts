@@ -199,7 +199,13 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     } else {
       template = templateHtmlPromise ? await templateHtmlPromise : "";
     }
-    return template.replace("<!--app-head-->", head).replace("<!--app-html-->", body);
+    const headSplit = template.split("<!--app-head-->");
+    const piece1 = headSplit[0];
+    const bodySplit = headSplit[1].split("<!--app-html-->");
+    const piece2 = bodySplit[0];
+    const piece3 = bodySplit[1];
+
+    return piece1 + head + piece2 + body + piece3;
   }
 
   function getRelevantHooks() {
