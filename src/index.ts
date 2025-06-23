@@ -6,6 +6,7 @@ import fs from "fs";
 import fsAsync from "fs/promises";
 import minimist from "minimist";
 import path from "path";
+import { getDeps } from "./preload.js";
 
 export interface VitePluginConfig {
   /**
@@ -36,6 +37,10 @@ export type InitVite = {
    * with empty head/body and extracts only the head portion.
    */
   generateHeadContent: () => Promise<string>;
+  /**
+   * Returns the dependencies for the given modules. Useful for preloading modules.
+   */
+  getDeps: (modules: string[]) => string[];
 } & ({
   mode: "dev";
   server: ViteDevServer;
@@ -197,6 +202,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   let app!: express.Application;
   let stop!: () => void;
   let templateHtmlPromise: Promise<string> | undefined;
+  let initVite: InitVite;
 
   async function internalGenerateHTMLTemplate(url: string, head: string, body: string) {
     let template = "";
@@ -266,23 +272,13 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
 
     for (const plugin of clientPluginManager) {
       if (plugin.postInit) {
-        await plugin.postInit({
-          mode: isProduction ? "prod" : "dev",
-          server: vite,
-          generateHTMLTemplate,
-          generateHeadContent,
-        } as InitVite);
+        await plugin.postInit(initVite);
       }
     }
 
     for (const plugin of serverPluginManager) {
       if (plugin.postInit) {
-        await plugin.postInit({
-          mode: isProduction ? "prod" : "dev",
-          server: vite,
-          generateHTMLTemplate,
-          generateHeadContent,
-        } as InitVite);
+        await plugin.postInit(initVite);
       }
     }
   }
@@ -310,6 +306,13 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     name: "vite",
     init: async (_plugins) => {
       plugins = _plugins;
+      initVite = {
+        get mode() { return isProduction ? "prod" : "dev" },
+        get server() { return vite },
+        generateHTMLTemplate,
+        generateHeadContent,
+        getDeps: (modules) => getDeps(modules, vite, isProduction),
+      } as InitVite;
     },
     postInit: async () => {
       
@@ -350,12 +353,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
       : undefined;
 
       for (const hook of initViteHooks) {
-        await hook({
-          mode: isProduction ? "prod" : "dev",
-          server: vite,
-          generateHTMLTemplate,
-          generateHeadContent,
-        });
+        await hook(initVite);
       }
     },
   };

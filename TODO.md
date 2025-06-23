@@ -1,0 +1,2 @@
+- [ ] Implement unit tests for preloading of .css files both during dev, and production builds
+- [ ] Remove AI bloat from the readme
