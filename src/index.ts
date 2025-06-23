@@ -25,7 +25,17 @@ export interface VitePluginConfig {
 type MaybePromise<T> = T | Promise<T>;
 
 export type InitVite = {
+  /**
+   * Opinionated. Generates a complete HTML template with custom head and body content injected.
+   * Uses some sane defaults, albeit opinionated, such as UTF-8 and viewport meta tag.
+   */
   generateHTMLTemplate: (url: string, head: string, body: string) => Promise<string>;
+  /**
+   * Unopinionated. Generates just the processed head content (everything between <head> tags).
+   * This is a convenience function that internally calls generateHTMLTemplate 
+   * with empty head/body and extracts only the head portion.
+   */
+  generateHeadContent: () => Promise<string>;
 } & ({
   mode: "dev";
   server: ViteDevServer;
@@ -67,13 +77,11 @@ function createViteEnvironment(serverPluginModules: string[], clientPluginModule
   const indexHtml = `<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--app-head-->
+    <script type="module" src="/client.ts"></script>
   </head>
   <body>
     <div id="app"><!--app-html--></div>
-    <script type="module" src="/client.ts"></script>
   </body>
 </html>`;
 
@@ -190,7 +198,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   let stop!: () => void;
   let templateHtmlPromise: Promise<string> | undefined;
 
-  async function generateHTMLTemplate(url: string, head: string, body: string) {
+  async function internalGenerateHTMLTemplate(url: string, head: string, body: string) {
     let template = "";
     
     if (vite) {
@@ -206,6 +214,16 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     const piece3 = bodySplit[1];
 
     return piece1 + head + piece2 + body + piece3;
+  }
+
+  async function generateHTMLTemplate(url: string, head: string, body: string) {
+    head = `<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />` + head;
+    return internalGenerateHTMLTemplate(url, head, body);
+  }
+
+  async function generateHeadContent() {
+    const htmlTemplate = await internalGenerateHTMLTemplate("/", "", "");
+    return htmlTemplate.split("<head>")[1].split("</head>")[0];
   }
 
   function getRelevantHooks() {
@@ -252,7 +270,8 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
           mode: isProduction ? "prod" : "dev",
           server: vite,
           generateHTMLTemplate,
-        });
+          generateHeadContent,
+        } as InitVite);
       }
     }
 
@@ -262,7 +281,8 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
           mode: isProduction ? "prod" : "dev",
           server: vite,
           generateHTMLTemplate,
-        });
+          generateHeadContent,
+        } as InitVite);
       }
     }
   }
@@ -334,6 +354,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
           mode: isProduction ? "prod" : "dev",
           server: vite,
           generateHTMLTemplate,
+          generateHeadContent,
         });
       }
     },
