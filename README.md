@@ -28,6 +28,7 @@ npm install @yetifrozty/vite-plugin
 interface ViteHooks {
   configureVite?: (config: VitePluginConfig) => MaybePromise<VitePluginConfig>;
   initVite?: (vite: InitVite) => MaybePromise<void>;
+  postInitVite?: () => MaybePromse<void>;
 }
 ```
 
@@ -58,8 +59,8 @@ type InitVite = {
 
 ```typescript
 interface SSRBaseHooks {
-  init?: (plugins: any[]) => MaybePromise<void>;
-  postInit?: (vite: InitVite) => MaybePromise<void>;
+  init?: (plugins: any[], vite: InitVite) => MaybePromise<void>;
+  postInit?: () => MaybePromise<void>;
 }
 ```
 
@@ -67,8 +68,8 @@ interface SSRBaseHooks {
 
 ```typescript
 interface SSRBaseHooks {
-  init?: (plugins: any[]) => MaybePromise<void>;
-  postInit?: (vite?: InitVite) => MaybePromise<void>;
+  init?: (plugins: any[], vite?: InitVite) => MaybePromise<void>;
+  postInit?: () => MaybePromise<void>;
 }
 ```
 

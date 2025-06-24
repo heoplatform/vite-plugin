@@ -1,3 +1,0 @@
-- [x] Implement unit tests for preloading of .css files both during dev, and production builds
-- [ ] Remove AI bloat from the readme
-- [x] Add a postInitVite hook, and move the InitVite object from client- and server plugins' postInit hook, to the initHook, to prevent side-effects from accessing uninitialized plugins.
