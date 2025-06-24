@@ -2,10 +2,6 @@ import path from "path";
 import type { ViteDevServer } from "vite";
 import fs from "fs";
 
-const cwd = process.cwd();
-const manifest = fs.existsSync(path.join(cwd, ".vite/dist/client/.vite/ssr-manifest.json")) ? fs.readFileSync(path.join(cwd, ".vite/dist/client/.vite/ssr-manifest.json"), "utf-8") : "{}";
-const manifestJson: Record<string, string[]> = Object.fromEntries(Object.entries(JSON.parse(manifest)).map(([key, value]) => [path.join(cwd, ".vite", key), value])) as any;
-
 function collectDepsDev(viteDevServer: ViteDevServer, entryId: string, seen = new Set<string>()): Set<string> {
   const mod = viteDevServer.moduleGraph.getModuleById(entryId);
   if (!mod || !mod.id || seen.has(mod.id)) return seen;
@@ -60,7 +56,16 @@ function extractPackageName(filePath: string): string | null {
   return parts[0];
 }
 
-export function getDeps(modules: string[], viteDevServer?: ViteDevServer, isProduction: boolean = false) {
+export function getDeps(modules: string[], viteDevServer?: ViteDevServer) {
+  const cwd = process.cwd();
+  let manifestJson: Record<string, string[]> = {};
+  try {
+    const manifest = fs.existsSync(path.join(cwd, ".vite/dist/client/.vite/ssr-manifest.json")) ? fs.readFileSync(path.join(cwd, ".vite/dist/client/.vite/ssr-manifest.json"), "utf-8") : "{}";
+    manifestJson = Object.fromEntries(Object.entries(JSON.parse(manifest)).map(([key, value]) => [path.join(cwd, ".vite", key), value])) as any;
+  } catch (e) {
+    console.warn("Failed to parse ssr-manifest.json", e);
+  }
+
   let deps: string[] = [];
 
   modules = modules.map(module => {
@@ -74,12 +79,12 @@ export function getDeps(modules: string[], viteDevServer?: ViteDevServer, isProd
   })
   
   for (const module of modules) {
-    if (isProduction) { 
+    if (!viteDevServer) { 
       const manifestModules = manifestJson[module];
       if (manifestModules) {
         deps.push(...manifestModules);
       }
-    } else if (viteDevServer) {
+    } else {
       try {
         const depsDev = collectDepsDev(viteDevServer, module);
         if (depsDev && depsDev.size > 0) {

@@ -313,7 +313,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
         get server() { return vite },
         generateHTMLTemplate,
         generateHeadContent,
-        getDeps: (modules) => getDeps(modules, vite, isProduction),
+        getDeps: (modules) => getDeps(modules, vite),
       } as InitVite;
     },
     postInit: async () => {
