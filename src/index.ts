@@ -51,16 +51,17 @@ export type InitVite = {
 export interface ViteHooks {
   configureVite?: (config: VitePluginConfig) => MaybePromise<VitePluginConfig>;
   initVite?: (vite: InitVite) => MaybePromise<void>;
+  postInitVite?: () => MaybePromise<void>;
 }
 
 export interface SSRBaseHooks {
-  init?: (plugins: any[]) => MaybePromise<void>;
-  postInit?: (vite: InitVite) => MaybePromise<void>;
+  init?: (plugins: any[], vite: InitVite) => MaybePromise<void>;
+  postInit?: () => MaybePromise<void>;
 }
 
 export interface ClientBaseHooks {
-  init?: (plugins: any[]) => MaybePromise<void>;
-  postInit?: (vite?: InitVite) => MaybePromise<void>;
+  init?: (plugins: any[], vite?: InitVite) => MaybePromise<void>;
+  postInit?: () => MaybePromise<void>;
 }
 
 function pluginHasViteHooks(plugin: any): plugin is ViteHooks {
@@ -236,7 +237,8 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     const relevantPlugins = plugins.filter(pluginHasViteHooks);
     const configureViteHooks = relevantPlugins.map((p) => p.configureVite).filter(isTruthy);
     const initViteHooks = relevantPlugins.map((p) => p.initVite).filter(isTruthy);
-    return { configureViteHooks, initViteHooks };
+    const postInitViteHooks = relevantPlugins.map((p) => p.postInitVite).filter(isTruthy);
+    return { configureViteHooks, initViteHooks, postInitViteHooks };
   }
 
   async function reloadPlugins() {
@@ -248,10 +250,10 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     
     const cwd = process.cwd();
     const clientPluginModule = isProduction ? await import(path.join(cwd, "./.vite/dist/server/clientPlugins.js") as string) : await vite.ssrLoadModule("/clientPlugins.ts");
-    const clientPluginManager = clientPluginModule.default();
+    const clientPluginManager: (ClientBaseHooks & {_vitePlugin: true})[] = clientPluginModule.default();
 
     const serverPluginModule = isProduction ? await import(path.join(cwd, "./.vite/dist/server/server.js") as string) : await vite.ssrLoadModule("/server.ts");
-    const serverPluginManager = serverPluginModule.default();
+    const serverPluginManager: (SSRBaseHooks & {_vitePlugin: true})[] = serverPluginModule.default();
 
     plugins.push(...clientPluginManager);
     plugins.push(...serverPluginManager);
@@ -259,26 +261,26 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     for (const plugin of clientPluginManager) {
       plugin._vitePlugin = true;
       if (plugin.init) {
-        await plugin.init(plugins);
+        await plugin.init(plugins, initVite);
       }
     }
 
     for (const plugin of serverPluginManager) {
       plugin._vitePlugin = true;
       if (plugin.init) {
-        await plugin.init(plugins);
+        await plugin.init(plugins, initVite);
       }
     }
 
     for (const plugin of clientPluginManager) {
       if (plugin.postInit) {
-        await plugin.postInit(initVite);
+        await plugin.postInit();
       }
     }
 
     for (const plugin of serverPluginManager) {
       if (plugin.postInit) {
-        await plugin.postInit(initVite);
+        await plugin.postInit();
       }
     }
   }
@@ -324,7 +326,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     postInitExpress: async () => {
       const args = minimist(process.argv.slice(2));
 
-      const { configureViteHooks, initViteHooks } = getRelevantHooks();
+      const { configureViteHooks, initViteHooks, postInitViteHooks } = getRelevantHooks();
 
       if (args.build) {
         // no ssr
@@ -354,6 +356,10 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
 
       for (const hook of initViteHooks) {
         await hook(initVite);
+      }
+
+      for (const hook of postInitViteHooks) {
+        await hook();
       }
     },
   };
