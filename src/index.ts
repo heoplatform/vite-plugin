@@ -1,5 +1,5 @@
 import { BaseHooks } from "@yetifrozty/base-plugin-system";
-import { type ExpressHooks } from "@yetifrozty/express-plugin";
+import { ExpressPlugin, type ExpressHooks } from "@yetifrozty/express-plugin";
 import express from "express";
 import { createServer, build, ViteDevServer, type InlineConfig } from "vite";
 import fs from "fs";
@@ -41,6 +41,10 @@ export type InitVite = {
    * Returns the dependencies for the given modules. Useful for preloading modules.
    */
   getDeps: (modules: string[]) => string[];
+  /**
+   * The port that the server is running on. Inherited from the express plugin.
+   */
+  port: number;
 } & ({
   mode: "dev";
   server: ViteDevServer;
@@ -308,20 +312,21 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
     name: "vite",
     init: async (_plugins) => {
       plugins = _plugins;
+    },
+    initExpress: async (_app, _stop) => {
+      app = _app;
+      stop = _stop;
+
+      const expressPlugin = plugins.find((p): p is ExpressPlugin => p.name === "express");
+      const port = expressPlugin?.port ?? 5173;
       initVite = {
         get mode() { return isProduction ? "prod" : "dev" },
         get server() { return vite },
         generateHTMLTemplate,
         generateHeadContent,
         getDeps: (modules) => getDeps(modules, vite),
+        port: port,
       } as InitVite;
-    },
-    postInit: async () => {
-      
-    },
-    initExpress: async (_app, _stop) => {
-      app = _app;
-      stop = _stop;
     },
     postInitExpress: async () => {
       const args = minimist(process.argv.slice(2));
