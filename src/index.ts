@@ -370,4 +370,12 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   };
 }
 
+export async function injectVite(plugins: any[]) {
+  if (!plugins.find(p => p.name === "vite")) {
+    const vite = vitePlugin()
+    plugins.push(vite)
+    await vite.init?.(plugins)
+  }
+}
+
 export { vitePlugin };
