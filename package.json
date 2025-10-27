@@ -1,10 +1,10 @@
 {
-  "name": "@yetifrozty/vite-plugin",
+  "name": "@heoplatform/vite-plugin",
   "version": "1.1.2",
   "description": "The plugin for vite",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yetifrozty/vite-plugin.git"
+    "url": "git+https://github.com/heoplatform/vite-plugin.git"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
@@ -35,10 +35,10 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
-    "@yetifrozty/base-plugin-system": "^1.0.0",
+    "@heoplatform/base-plugin-system": "^1.0.0",
     "compression": "^1.8.0",
     "express": "^5.1.0",
-    "@yetifrozty/express-plugin": "^1.0.0",
+    "@heoplatform/express-plugin": "^1.0.0",
     "minimist": "^1.2.8",
     "sirv": "^3.0.1"
   }

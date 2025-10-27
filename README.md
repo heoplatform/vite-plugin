@@ -17,7 +17,7 @@ A Vite.js plugin for the base plugin system that provides modern frontend develo
 ## Installation
 
 ```bash
-npm install @yetifrozty/vite-plugin
+npm install @heoplatform/vite-plugin
 ```
 
 ## API
@@ -82,7 +82,7 @@ To use the vite plugin, create a bootstrap plugin which has the vite plugin as a
 The bootstrap plugin:
 
 ```ts
-import { vitePlugin } from '@yetifrozty/vite-plugin';
+import { vitePlugin } from '@heoplatform/vite-plugin';
 import solid from 'vite-plugin-solid'
 
 function solidExamplePlugin() {
@@ -99,8 +99,8 @@ function solidExamplePlugin() {
       }
     },
     configureVite: async (vite) => {
-      vite.clientPluginModules.push("@yetifrozty/solid-example-plugin/client");
-      vite.serverPluginModules.push("@yetifrozty/solid-example-plugin/server");
+      vite.clientPluginModules.push("@heoplatform/solid-example-plugin/client");
+      vite.serverPluginModules.push("@heoplatform/solid-example-plugin/server");
       
       if (!vite.config.plugins) vite.config.plugins = [];
       vite.config.plugins.push(solid({ssr: true}));
@@ -131,8 +131,8 @@ The server plugin:
 
 ```tsx
 import { Request, RequestHandler, Response, Router } from "express";
-import { ServerData } from "@yetifrozty/solid-plugin/server";
-import { InitVite, SSRBaseHooks, ViteHooks } from "@yetifrozty/vite-plugin";
+import { ServerData } from "@heoplatform/solid-plugin/server";
+import { InitVite, SSRBaseHooks, ViteHooks } from "@heoplatform/vite-plugin";
 import { generateHydrationScript, renderToStringAsync } from "solid-js/web";
 import SecondExample from "../client/SecondExample.jsx";
 
@@ -192,7 +192,7 @@ export default function SolidServerPlugin(): SolidExampleServerPlugin {
 The client plugin:
 
 ```ts
-import { type ClientBaseHooks } from "@yetifrozty/vite-plugin";
+import { type ClientBaseHooks } from "@heoplatform/vite-plugin";
 
 interface SolidExampleClientHooks extends ClientBaseHooks {
   name: "solid-example-client";

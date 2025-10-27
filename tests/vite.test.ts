@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { initPlugins } from '@yetifrozty/base-plugin-system';
-import { expressPlugin, type ExpressPlugin } from '@yetifrozty/express-plugin';
-import { vitePlugin } from '@yetifrozty/vite-plugin';
+import { initPlugins } from '@heoplatform/base-plugin-system';
+import { expressPlugin, type ExpressPlugin } from '@heoplatform/express-plugin';
+import { vitePlugin } from '@heoplatform/vite-plugin';
 import { createViteTestingPlugin } from './vite.testing.plugin';
 import { createServer, build } from 'vite';
 

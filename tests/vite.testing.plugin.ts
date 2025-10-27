@@ -1,6 +1,6 @@
-import { BaseHooks } from '@yetifrozty/base-plugin-system';
-import { ExpressHooks } from '@yetifrozty/express-plugin';
-import { ViteHooks, VitePluginConfig, InitVite } from '@yetifrozty/vite-plugin';
+import { BaseHooks } from '@heoplatform/base-plugin-system';
+import { ExpressHooks } from '@heoplatform/express-plugin';
+import { ViteHooks, VitePluginConfig, InitVite } from '@heoplatform/vite-plugin';
 import type express from 'express';
 
 export interface ViteTestingPluginActualHooks {
