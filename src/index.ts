@@ -339,9 +339,46 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
         createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
         
         await build(viteConfig.config);
+
+        // Read the client SSR manifest to get stable, content-hashed asset URLs.
+        // The SSR build would otherwise reprocess CSS through a different Tailwind
+        // pipeline (wrong @source context), producing a different hash that doesn't
+        // match any file on disk. We pin ?url CSS imports to the client-build URL.
+        const ssrManifest: Record<string, string[]> = JSON.parse(
+          await fsAsync.readFile("./.vite/dist/client/.vite/ssr-manifest.json", "utf-8")
+        );
+        const urlAssetMap = new Map<string, string>(); // absolute file path → client URL
+        for (const [moduleId, assets] of Object.entries(ssrManifest)) {
+          if (!moduleId.endsWith("?url")) continue;
+          const cssUrl = assets.find(a => a.endsWith(".css"));
+          if (!cssUrl) continue;
+          const absPath = path.resolve("./.vite", moduleId.replace(/\?url$/, ""));
+          urlAssetMap.set(absPath, cssUrl);
+        }
+
+        const ssrUrlResolverPlugin: import("vite").Plugin = {
+          name: "ssr-url-asset-resolver",
+          enforce: "pre",
+          async resolveId(id, importer) {
+            if (!id.endsWith("?url")) return;
+            const baseId = id.slice(0, -4);
+            const resolved = await this.resolve(baseId, importer, { skipSelf: true });
+            if (resolved && urlAssetMap.has(resolved.id)) {
+              return "\0ssr-url:" + urlAssetMap.get(resolved.id);
+            }
+          },
+          load(id) {
+            if (id.startsWith("\0ssr-url:")) {
+              return `export default ${JSON.stringify(id.slice(9))}`;
+            }
+          },
+        };
+
         // ssr
         const viteConfigSSR = await getViteProdConfig(true, configureViteHooks);
         createViteEnvironment(viteConfigSSR.serverPluginModules, viteConfigSSR.clientPluginModules);
+        if (!viteConfigSSR.config.plugins) viteConfigSSR.config.plugins = [];
+        viteConfigSSR.config.plugins.unshift(ssrUrlResolverPlugin);
         await build(viteConfigSSR.config);
 
         stop();
