@@ -349,28 +349,48 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
         );
         const urlAssetMap = new Map<string, string>(); // absolute file path → client URL
         for (const [moduleId, assets] of Object.entries(ssrManifest)) {
-          if (!moduleId.endsWith("?url")) continue;
-          const cssUrl = assets.find(a => a.endsWith(".css"));
-          if (!cssUrl) continue;
+          if (!moduleId.endsWith(".css?url")) continue;
           const absPath = path.resolve("./.vite", moduleId.replace(/\?url$/, ""));
+          // A module's manifest entry lists every asset of its chunk, not just its
+          // own. Match on the emitted [name]-[hash].css so that e.g. app.css?url
+          // doesn't pick up theme.css just because they share a chunk.
+          const stem = path.basename(absPath, ".css");
+          const cssUrl = assets.find(a => {
+            const base = path.basename(a);
+            if (!base.endsWith(".css")) return false;
+            return base.slice(0, -".css".length).replace(/-[\w-]{8}$/, "") === stem;
+          });
+          if (!cssUrl) continue;
           urlAssetMap.set(absPath, cssUrl);
+        }
+
+        // The virtual module id must not end in .css, or Vite's own CSS plugins
+        // claim it and strip the default export. Key it by index instead.
+        const ssrUrlModules = new Map<string, string>(); // virtual id → client URL
+        function ssrUrlModuleId(cssUrl: string) {
+          for (const [existing, url] of ssrUrlModules) {
+            if (url === cssUrl) return existing;
+          }
+          const id = `\0ssr-url:${ssrUrlModules.size}`;
+          ssrUrlModules.set(id, cssUrl);
+          return id;
         }
 
         const ssrUrlResolverPlugin: import("vite").Plugin = {
           name: "ssr-url-asset-resolver",
           enforce: "pre",
           async resolveId(id, importer) {
-            if (!id.endsWith("?url")) return;
+            // Only CSS: other ?url imports (images etc.) must keep Vite's own
+            // asset handling, otherwise they resolve to an unrelated stylesheet.
+            if (!id.endsWith(".css?url")) return;
             const baseId = id.slice(0, -4);
             const resolved = await this.resolve(baseId, importer, { skipSelf: true });
-            if (resolved && urlAssetMap.has(resolved.id)) {
-              return "\0ssr-url:" + urlAssetMap.get(resolved.id);
-            }
+            const cssUrl = resolved && urlAssetMap.get(resolved.id);
+            if (cssUrl) return ssrUrlModuleId(cssUrl);
           },
           load(id) {
-            if (id.startsWith("\0ssr-url:")) {
-              return `export default ${JSON.stringify(id.slice(9))}`;
-            }
+            const cssUrl = ssrUrlModules.get(id);
+            if (cssUrl) return `export default ${JSON.stringify(cssUrl)}`;
           },
         };
 
