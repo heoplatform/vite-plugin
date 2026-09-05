@@ -1,5 +1,5 @@
 import { BaseHooks } from "@heoplatform/base-plugin-system";
-import { ExpressPlugin, type ExpressHooks } from "@heoplatform/express-plugin";
+import { ExpressPlugin, getBasePath, type ExpressHooks } from "@heoplatform/express-plugin";
 import express from "express";
 import { createServer, build, ViteDevServer, type InlineConfig } from "vite";
 import fs from "fs";
@@ -45,6 +45,12 @@ export type InitVite = {
    * The port that the server is running on. Inherited from the express plugin.
    */
   port: number;
+  /**
+   * The path prefix the app is mounted under ("" or "/admin"). Inside Vite
+   * bundles the same value is available as `import.meta.env.BASE_URL`, which
+   * carries a trailing slash.
+   */
+  basePath: string;
 } & ({
   mode: "dev";
   server: ViteDevServer;
@@ -127,13 +133,13 @@ function isTruthy<T>(value: T): value is NonNullable<T> {
   return Boolean(value);
 }
 
-async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[], reload: () => Promise<void>) {
+async function getViteDevConfig(basePath: string, configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[], reload: () => Promise<void>) {
   let viteConfig: VitePluginConfig = {
     config: {
       server: { middlewareMode: true },
       appType: "custom",
       root: "./.vite",
-      base: "/",
+      base: basePath ? `${basePath}/` : "/",
       build: {
         target: "esnext",
       },
@@ -163,12 +169,12 @@ async function getViteDevConfig(configureViteHooks: ((config: VitePluginConfig) 
   return viteConfig;
 }
 
-async function getViteProdConfig(ssr: boolean, configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[]) {
+async function getViteProdConfig(basePath: string, ssr: boolean, configureViteHooks: ((config: VitePluginConfig) => MaybePromise<VitePluginConfig>)[]) {
   let viteConfig: VitePluginConfig = {
     config: {
       appType: "custom",
       root: "./.vite",
-      base: "/",
+      base: basePath ? `${basePath}/` : "/",
       build: {
         rollupOptions: ssr ? {
           input: ["./.vite/server.ts", "./.vite/client.ts", "./.vite/clientPlugins.ts"],
@@ -208,6 +214,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
   let stop!: () => void;
   let templateHtmlPromise: Promise<string> | undefined;
   let initVite: InitVite;
+  let basePath = "";
 
   async function internalGenerateHTMLTemplate(url: string, head: string, body: string) {
     let template = "";
@@ -294,7 +301,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
       configureViteHooks = getRelevantHooks().configureViteHooks;
     }
     if (!isProduction) {
-      const viteConfig = await getViteDevConfig(configureViteHooks, reloadPlugins);
+      const viteConfig = await getViteDevConfig(basePath, configureViteHooks, reloadPlugins);
       createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
       vite = await createServer(viteConfig.config);
       router.use(vite.middlewares);
@@ -302,7 +309,8 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
       const compression = (await import("compression")).default;
       const sirv = (await import("sirv")).default;
       router.use(compression());
-      router.use("/", sirv("./.vite/dist/client", { extensions: [] }));
+      // Assets are emitted with the base baked in, so they arrive prefixed.
+      router.use(basePath || "/", sirv("./.vite/dist/client", { extensions: [] }));
     }
 
     await reloadPlugins();
@@ -319,6 +327,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
 
       const expressPlugin = plugins.find((p): p is ExpressPlugin => p.name === "express");
       const port = expressPlugin?.port ?? 5173;
+      basePath = getBasePath(plugins);
       initVite = {
         get mode() { return isProduction ? "prod" : "dev" },
         get server() { return vite },
@@ -326,6 +335,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
         generateHeadContent,
         getDeps: (modules) => getDeps(modules, vite),
         port: port,
+        basePath: basePath,
       } as InitVite;
     },
     postInitExpress: async () => {
@@ -335,7 +345,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
 
       if (args.build) {
         // no ssr
-        const viteConfig = await getViteProdConfig(false, configureViteHooks);
+        const viteConfig = await getViteProdConfig(basePath, false, configureViteHooks);
         createViteEnvironment(viteConfig.serverPluginModules, viteConfig.clientPluginModules);
         
         await build(viteConfig.config);
@@ -395,7 +405,7 @@ function vitePlugin(): BaseHooks & ExpressHooks & {name: "vite"} {
         };
 
         // ssr
-        const viteConfigSSR = await getViteProdConfig(true, configureViteHooks);
+        const viteConfigSSR = await getViteProdConfig(basePath, true, configureViteHooks);
         createViteEnvironment(viteConfigSSR.serverPluginModules, viteConfigSSR.clientPluginModules);
         if (!viteConfigSSR.config.plugins) viteConfigSSR.config.plugins = [];
         viteConfigSSR.config.plugins.unshift(ssrUrlResolverPlugin);
